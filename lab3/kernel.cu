@@ -83,7 +83,7 @@ __global__ void kernel_shared(float* dev_a, float* dev_b, int* dev_res, int n, i
 	//int row = bx * blockDim.x + tx;
 	int dev_res_private = 1;
 	__shared__ int dev_res_shared;
-	__shared__ float cache_a[128][32], cache_b[128][32];// Maybe better use cache_a[8][32], cache_b[8][32]; OR cache_a[256][16], cache_b[256][16];
+	__shared__ float cache_a[128][33], cache_b[128][33];
 	for (int k = 0; k < n/32; k++){
 		//заполняем кеши
 		for (int p = 0; p < 32; p++ ){
@@ -91,7 +91,7 @@ __global__ void kernel_shared(float* dev_a, float* dev_b, int* dev_res, int n, i
 			cache_b[tx/32 + p*4][tx%32] = dev_b[( tx/32 + p*4 + bx*128 )*n + tx%32 + k*32];
 		}
 		for (int j = 0; j < 32; ++j) {
-			dev_res_private &= cache_b[tx/32 + j*4][tx%32] == cache_a[tx/32 + j*4][tx%32];
+			dev_res_private &= cache_b[tx][j] == cache_a[tx][j];
 		}
 	}
 	if (threadIdx.x == 0) dev_res_shared = 1;
