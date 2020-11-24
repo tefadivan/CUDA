@@ -6,7 +6,7 @@
 #include <time.h>
 
 #define MAX_SHIFT 2
-#define BLOCK_SIZE 256
+#define BLOCK_SIZE 128
 #define SHIFT 3
 using namespace std;
 
@@ -77,20 +77,21 @@ __global__ void kernel(float* dev_a, float* dev_b, int* dev_res, int n) {
 	}
 }
 
-__global__ void kernel_shared(float* dev_a, float* dev_b, int* dev_res, int n) {
+// BLOCK_SIZE 128
+__global__ void kernel_shared(float* dev_a, float* dev_b, int* dev_res, int n, int m) {
 	int tx = threadIdx.x, bx = blockIdx.x;
-	int row = bx * blockDim.x + tx;
+	//int row = bx * blockDim.x + tx;
 	int dev_res_private = 1;
 	__shared__ int dev_res_shared;
-	__shared__ float cache_a[256][32], cache_b[256][32];// Maybe better use cache_a[8][32], cache_b[8][32]; OR cache_a[256][16], cache_b[256][16]; 
-	for (int k = 0; k < n/32; k++) {
+	__shared__ float cache_a[128][32], cache_b[128][32];// Maybe better use cache_a[8][32], cache_b[8][32]; OR cache_a[256][16], cache_b[256][16];
+	for (int k = 0; k < n/32; k++){
 		//заполняем кеши
 		for (int p = 0; p < 32; p++ ){
-			cache_a[tx/32 + p*8][tx%32] = dev_a[];
-			cache_b[tx/32 + p*8][tx%32] = dev_b[];
+			cache_a[tx/32 + p*4][tx%32] = dev_a[( tx/32 + p*4 + bx*128 )*n + (tx%32 + k*32 + SHIFT) % n];
+			cache_b[tx/32 + p*4][tx%32] = dev_b[( tx/32 + p*4 + bx*128 )*n + tx%32 + k*32];
 		}
-		for (int j = 0; j < 256; ++j) {
-			dev_res_private &= cache_b[bx * blockDim.x][j] == cache_a[bx * blockDim.x][j];
+		for (int j = 0; j < 32; ++j) {
+			dev_res_private &= cache_b[tx/32 + j*4][tx%32] == cache_a[tx/32 + j*4][tx%32];
 		}
 	}
 	if (threadIdx.x == 0) dev_res_shared = 1;
@@ -108,7 +109,7 @@ __global__ void kernel_shared(float* dev_a, float* dev_b, int* dev_res, int n) {
 
 int main(int argc, char** argv)
 {
-	int n = 1024, m = 26500, shift = 1;
+	int n = 1024, m = 26880, shift = 1;
 	float* a = generateSimpleCyclicMatrix(n, m);
 	float* b = generateCyclicShiftMatrix(a, n, m, shift);
 	int res_CPU = true, *res_GPU = new int[1];
@@ -125,6 +126,7 @@ int main(int argc, char** argv)
 
 	dim3 gridSize = dim3(m / BLOCK_SIZE, 1, 1);
 	dim3 blockSize = dim3(BLOCK_SIZE, 1, 1);
+
 	int* dev_res;
 	float* dev_a, * dev_b;
 	int sz = n * m * sizeof(float), sz_shifts = sizeof(int);
@@ -136,7 +138,7 @@ int main(int argc, char** argv)
 	cudaMemcpy(dev_res, res_GPU, sz_shifts, cudaMemcpyHostToDevice);
 
 	cudaEventRecord(startCUDA, 0);
-	kernel_shared <<<gridSize, blockSize>>> (dev_a, dev_b, dev_res, n);
+	kernel_shared <<<gridSize, blockSize>>> (dev_a, dev_b, dev_res, n, m);
 	cudaEventRecord(stopCUDA, 0);
 	cudaEventSynchronize(stopCUDA);
 	cudaEventElapsedTime(&elapsedTimeCUDA, startCUDA, stopCUDA);
